@@ -1,4 +1,3 @@
-#undef __ARM_FP
 #pragma once
 #include "mbed.h"
 
