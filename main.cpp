@@ -34,6 +34,7 @@ Keypad mykeypad(PTC8, PTA5, PTA4, PTA12, PTD3, PTA2, PTA1);
 SLCD mydisplay;
 FlashIAP mymemory;
 Password pass;
+Thread thread1;
 const int bufferSize = 32;
 const int displayDigits = 4;
 char keypad_input[bufferSize] = {0};
@@ -52,14 +53,31 @@ void init_flash();
 uint32_t calculate_checksum(const PasswordEntry& entry);
 bool load_latest_entry();
 void save_entry();
-void Input(char key);
+//void Input(char key);
 void handle_input_display(char new_char);
 void Output(const char* output_str);
+char* keypress_to_array(char one_key);
+void keypad_thread ();
 //void validate_password(const char* pw);
 
- char[9] keypress_to_array(char one_key){
+
+int main() 
+{
+    mydisplay.clear();
+    mydisplay.Home();
+
+    init_flash();
+
+    for (int i = 0; i < bufferSize; i++) 
+    {
+        keypad_input[i] = ' ';
+    }
+thread1.start(keypad_thread);   
+}
+
+char* keypress_to_array(char one_key){
     char pressedkey;        
-    char input[9]; // 8 digits + '#' + null terminator
+    static char input[9]; // 8 digits + '#' + null terminator
     input[0]= one_key;
     int index = 1;
 
@@ -79,15 +97,15 @@ void Output(const char* output_str);
         }
     }
 }
-Thread thread1;
 void keypad_thread (){
-while(true)
+    while(true)
      {
         char key = mykeypad.ReadKey();
 
         if(key != NO_KEY && key >= '0' && key <= '9') 
         {
-            int password_number = pass.check_password (keypress_to_string(key));
+            char* password_input = keypress_to_array(key);
+            int password_number = pass.check_password(password_input);
     
         }
         //ThisThread::sleep_for(200ms);
@@ -96,20 +114,6 @@ while(true)
 
 
  
-int main() 
-{
-    mydisplay.clear();
-    mydisplay.Home();
-
-    init_flash();
-
-    for (int i = 0; i < bufferSize; i++) 
-    {
-        keypad_input[i] = ' ';
-    }
-thread1.start(keypad_thread);   
-}
-
 void init_flash() 
 {
     mymemory.init();
