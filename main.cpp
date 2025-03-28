@@ -5,20 +5,26 @@
 #include "keypad.h"
 #include "mbed.h"
 #include "SLCD.h"
+//#include <array>
+#include "Password.h"
+#include <string>
 // Blinking rate in milliseconds
 #define BLINKING_RATE 600ms
 #define BLINKING_RATE2 200ms
 using ThisThread::sleep_for;
 
-Keypad MyKeypad( PTA12,PTA4, PTA5, PTC8, PTD3, PTA2, PTA1);
+Keypad MyKeypad( PTC8,PTA5, PTA4, PTA12, PTD3, PTA2, PTA1);
 DigitalOut led1(LED1);
 DigitalOut led2(LED2);
 Thread thread1;
 Thread thread2;
 Thread thread3;
 SLCD screen;
-Ticker my_timer;
-char pressedkey;        
+unsigned char pressedkey;   
+void reset() {
+  screen.clear();
+  screen.Home();
+}
 void led1_thread()
 {
     while (true) {
@@ -33,25 +39,38 @@ void led2_thread()
  ThisThread::sleep_for(BLINKING_RATE2); 
 }
 }
-void keypad_thread(){
+ string keypress_to_string(char input[9]){
     while (true){
+        char input[9]; // 8 digits + '#' + null terminator
+        int index = 0;
         pressedkey = MyKeypad.ReadKey();
-        if (pressedkey!=NO_KEY) {
-            //screen.printf("I-%02x", pressedkey);
-            screen.printf("%d", pressedkey);
+        if (pressedkey == '#') { 
+        input[index] = '\0'; // Null-terminate the password
+        //printf("Password entered: %s\n", input);
+        index = 0; // Reset for next input
+    } 
+        else if (pressedkey >= '0' && pressedkey <= '9') {
+    input[index++] = pressedkey;
+    return(input);
+    }}}
 
-        }
-        sleep_for(BLINKING_RATE);
-    }
-}
+
+
+char input[9]; // 8 digits + null terminator
 int main() {
-screen.clear();
-screen.Home();
-thread1.start(led1_thread);
-thread2.start(led2_thread);
-thread3.start(keypad_thread);
- while (true) { // Added infinite loop to keep main running
- printf("%c",MyKeypad.ReadKey()); // to test if the key press is coming through
-        sleep_for(1s); // Prevent main from consuming too much CPU
+  sleep_for(500ms); // Give time for  chip  to start
+  reset();
+  Password pass;
+
+  
+  keypress_to_string(input);
+
+
+  if (pass.check_password(input)) {
+    screen.putc(1);//temporay till i figure out letter output
+    } else {
+    screen.putc(0);
+    }
+
 }
-}
+ 
