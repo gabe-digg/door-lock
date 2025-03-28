@@ -67,12 +67,12 @@ int main()
     mydisplay.Home();
 
     init_flash();
-
+thread1.start(keypad_thread);   
     for (int i = 0; i < bufferSize; i++) 
     {
         keypad_input[i] = ' ';
     }
-thread1.start(keypad_thread);   
+
 }
 
 char* keypress_to_array(char one_key){
@@ -81,7 +81,7 @@ char* keypress_to_array(char one_key){
     input[0]= one_key;
     int index = 1;
 
-    while (true)
+    while (index < 8)
     {
         pressedkey = mykeypad.ReadKey();
         if ((pressedkey == '#')||(index>=8)) //  ente
@@ -95,7 +95,10 @@ char* keypress_to_array(char one_key){
             input[index++] = pressedkey;
             handle_input_display(pressedkey);
         }
+    ThisThread::sleep_for(10ms);
     }
+input[8] = '\0'; // Ensure null termination
+return input;
 }
 void keypad_thread (){
     while(true)
