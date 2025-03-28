@@ -86,7 +86,7 @@ const char ASCII_TO_WF_CODIFICATION_TABLE [ ] = {
 SLCD::SLCD()
 {
     init();
-    CharPosition = 0;
+    CharPosition = _CHARNUM - 1;
 }
 
 void SLCD::init()
@@ -145,6 +145,15 @@ void SLCD::init()
     LCD->GCR |= LCD_GCR_LCDEN_MASK;
 }
 
+void SLCD::puts(const char *str) 
+{
+    for (int s = 0; str[s] != '\0' && s < _CHARNUM; s++) 
+    {
+        CharPosition = s;
+        putc(str[s]);
+    }
+}   //outputstring
+
 int SLCD::_putc(int c)
 {
     Write_Char(c);
@@ -153,8 +162,8 @@ int SLCD::_putc(int c)
 
 void SLCD::Write_Char (char lbValue)
 {
-    if (CharPosition >= _CHARNUM)
-        CharPosition = 0;
+    if (CharPosition >= _CHARNUM - 1)
+        CharPosition = _CHARNUM - 1;
 
     if (lbValue == '.') {
         // Use built-in dot
@@ -192,12 +201,12 @@ void SLCD::Write_Char (char lbValue)
         //  if (char_val==0) lbCounter = _CHAR_SIZE; //end of this character
         lbCounter++;
     }
-    CharPosition++;
+    CharPosition--;
 }
 
 void SLCD::Home()
 {
-    CharPosition =  0;
+    CharPosition = _CHARNUM - 1;
 }
 
 void SLCD::Contrast (uint8_t lbContrast)
