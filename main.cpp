@@ -7,6 +7,8 @@
 #include "ThisThread.h"
 #include "SLCD.h"
 #include "FlashIAP.h"
+#include "Password.h"
+#include <string>
 
 #define FLASH_TOTAL_SIZE    0x00040000  // 256KB
 #define FLASH_BLOCK_SIZE    1024        // 扇区大小1KB
@@ -31,7 +33,7 @@ struct PasswordEntry
 Keypad mykeypad(PTC8, PTA5, PTA4, PTA12, PTD3, PTA2, PTA1);
 SLCD mydisplay;
 FlashIAP mymemory;
-
+Password pass;
 const int bufferSize = 32;
 const int displayDigits = 4;
 char keypad_input[bufferSize] = {0};
@@ -51,11 +53,49 @@ uint32_t calculate_checksum(const PasswordEntry& entry);
 bool load_latest_entry();
 void save_entry();
 void Input(char key);
-void handle_input_password(char new_char);
+void handle_input_display(char new_char);
 void Output(const char* output_str);
 //void validate_password(const char* pw);
 
+ char[9] keypress_to_array(char one_key){
+    char pressedkey;        
+    char input[9]; // 8 digits + '#' + null terminator
+    input[0]= one_key;
+    int index = 1;
 
+    while (true)
+    {
+        pressedkey = mykeypad.ReadKey();
+        if ((pressedkey == '#')||(index>=8)) //  ente
+        { 
+            input[index] = '\0'; // Null-terminate the password
+        //printf("Password entered: %s\n", input);
+            index = 0; // Reset for next input
+            return input;
+        } 
+        else if (pressedkey >= '0' && pressedkey <= '9') {
+            input[index++] = pressedkey;
+            handle_input_display(pressedkey);
+        }
+    }
+}
+Thread thread1;
+void keypad_thread (){
+while(true)
+     {
+        char key = mykeypad.ReadKey();
+
+        if(key != NO_KEY && key >= '0' && key <= '9') 
+        {
+            int password_number = pass.check_password (keypress_to_string(key));
+    
+        }
+        //ThisThread::sleep_for(200ms);
+    }
+}
+
+
+ 
 int main() 
 {
     mydisplay.clear();
@@ -67,17 +107,7 @@ int main()
     {
         keypad_input[i] = ' ';
     }
-
-    while(true)
-     {
-        char key = mykeypad.ReadKey();
-
-        if(key != 0) 
-        {
-            Input(key);
-        }
-        ThisThread::sleep_for(200ms);
-    }
+thread1.start(keypad_thread);   
 }
 
 void init_flash() 
@@ -174,22 +204,21 @@ void save_entry()
     }
 }
 
-
-
-void Input(char key)
+/*void Input(char key)
 {
-    if(key == '#') 
+    if(key == '#') // clear
     {  
         memset(keypad_input, 0, bufferSize);
         input_index = 0;
         input_pos = 0;
         mydisplay.clear();
     }
-    else if(key == '*') 
+    else if(key == '*') //enter
     {  
         if(input_pos == 8) 
         {
             //validate_password(input_buffer);
+            pass.check_password(input_buffer);
              mydisplay.clear();
         }
     }
@@ -197,20 +226,20 @@ void Input(char key)
     {  
         if(input_pos < 8) 
         {
-            handle_input_password(key);
+            handle_input_display(key);
         }
     }
-}
+} */
 
 
-void handle_input_password(char new_char) 
+void handle_input_display(char new_char) 
 {
     if(new_char >= '0' && new_char <= '9') 
     {
         keypad_input[input_index] = new_char;
         input_index = (input_index + 1) % bufferSize;
 
-        input_buffer[input_pos++] = new_char;  //check
+        //input_buffer[input_pos++] = new_char;  //check
 
         mydisplay.clear();
         mydisplay.Home();

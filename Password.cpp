@@ -36,13 +36,29 @@ bool Password::delete_password(const char* password_to_delete) {
     return false; // Password not found
 }
 
-// Check if input matches any stored password
-int Password::check_password( char input[MAX_LENGTH + 1]) {
-    for (int i = 0 ; i < password_count; i++) {
-        if (strncmp(stored_passwords[i], input, MAX_LENGTH) == 0) {
-            return i; // Match found
+
+int Password::check_password(char password_number_input[9])
+{
+    int check = 0;
+    int i = 0;
+    int n = 0;
+    
+    for( i = 0; i <= MAX_PASSWORDS; i++)
+    {
+        check = i;
+        for (int n = 0; n <= MAX_LENGTH; n++)
+        {
+            if(password_number_input[n] != stored_passwords[i][n])
+            {
+                break;
+            }
+        if ( MAX_LENGTH == n )
+        {
+            return check;
+        }
+            
         }
     }
     return 99;
-}
 
+}
