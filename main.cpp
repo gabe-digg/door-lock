@@ -66,7 +66,7 @@ int main()
     mydisplay.clear();
     mydisplay.Home();
 
-    //init_flash();
+    init_flash();
     Output(" DONE");
  int correct_password = thread1.start(waiting_for_input);   
     for (int i = 0; i < bufferSize; i++) 
@@ -267,7 +267,7 @@ void handle_input_display(char new_char)
     }
 }
 
-/*void init_flash() 
+void init_flash() 
 {
     mymemory.init();
     if(!boot_load_passwords()) 
@@ -280,7 +280,7 @@ void handle_input_display(char new_char)
         Output(" INIT DEFAULT");
     }
 }
-*/
+
 void Output(const char* output_str) 
 {
     int print_len = strlen(output_str);
