@@ -68,7 +68,8 @@ int main()
     mydisplay.Home();
 
     init_flash();
-thread1.start(waiting_for_input);   
+//    Output(" DONE");
+// int correct_password = thread1.start(waiting_for_input);   
     for (int i = 0; i < bufferSize; i++) 
     {
         keypad_input[i] = ' ';
@@ -111,9 +112,8 @@ int waiting_for_input (){
             char* password_input = keypress_to_array(key);
             int password_number = pass.check_password(password_input);
             return password_number;
-
         }
-        //ThisThread::sleep_for(200ms);
+        ThisThread::sleep_for(20ms);
     }
            
 
