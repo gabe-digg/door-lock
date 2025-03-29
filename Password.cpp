@@ -66,9 +66,3 @@ int Password::check_password(char password_number_input[9])
 void Password::load_password(const char *raw) {
 memcpy(stored_passwords, raw, MAX_LENGTH * MAX_PASSWORDS);
 }
-
-char* Password::save_password() {
-static char raw[MAX_LENGTH * MAX_PASSWORDS];
-memcpy(raw, stored_passwords, MAX_LENGTH * MAX_PASSWORDS);
-return raw;
-}
