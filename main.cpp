@@ -100,7 +100,7 @@ char* keypress_to_array(char one_key){
 input[8] = '\0'; // Ensure null termination
 return input;
 }
-void keypad_thread (){
+int waiting_for_input (){
     while(true)
      {
         char key = mykeypad.ReadKey();
@@ -109,10 +109,13 @@ void keypad_thread (){
         {
             char* password_input = keypress_to_array(key);
             int password_number = pass.check_password(password_input);
-    
+            return password_number;
+
         }
         //ThisThread::sleep_for(200ms);
     }
+           
+
 }
 
 
