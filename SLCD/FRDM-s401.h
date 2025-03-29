@@ -1,3 +1,4 @@
+#include <cstdint>
 #pragma once
 /*^^^^^^^^^^^^^^^^      LCD HARDWARE CONECTION ^^^^^^^^^^^^^^^^^^^^^^^^*/
 #define  _LCDFRONTPLANES   (8)            // # of frontPlanes
