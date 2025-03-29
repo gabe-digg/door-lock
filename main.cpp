@@ -58,7 +58,7 @@ void save_entry();
 void handle_input_display(char new_char);
 void Output(const char* output_str);
 char* keypress_to_array(char one_key);
-void keypad_thread ();
+int waiting_for_input ();
 //void validate_password(const char* pw);
 
 
@@ -68,7 +68,7 @@ int main()
     mydisplay.Home();
 
     init_flash();
-thread1.start(keypad_thread);   
+thread1.start(waiting_for_input);   
     for (int i = 0; i < bufferSize; i++) 
     {
         keypad_input[i] = ' ';
