@@ -193,11 +193,11 @@ bool boot_load_passwords(Password& pass, uint16_t& current_index) //& 是传refe
     // 加载到 class Password 中 Load it into the class of Password
     pass.load((char*)entry.passwords); 
 
-     /*void load(const char* raw) 
+     void load(const char* raw) 
     {
         memcpy(passwords, raw, MAX_PASSWORDS * PASSWORD_SIZE)); 
     }
-    need a   char passwords[MAX_PASSWORDS][PASSWORD_SIZE];*/
+    need a   char passwords[MAX_PASSWORDS][PASSWORD_SIZE];
 
     current_index = entry.index;
     mymemory.deinit(); //flash的关闭 close the flash
@@ -226,11 +226,11 @@ bool boot_save_passwords(const Password& pass, uint16_t current_index)
     entry.index = new_index;
 
     pass.extract((char*)entry.passwords);  //写从class中提取密码的函数 May should write a function that extracts the password from the class
-    /* void extract(char* out) const 
+    void extract(char* out) const 
     {
         memcpy(out, passwords, MAX_PASSWORDS * PASSWORD_SIZE);
     }
-    need a   char passwords[MAX_PASSWORDS][PASSWORD_SIZE];*/
+    need a   char passwords[MAX_PASSWORDS][PASSWORD_SIZE];
     entry.checksum = calculate_checksum((char*)entry.passwords, MAX_PASSWORDS * PASSWORD_SIZE);
 
     uint32_t addr = FLASH_BASE + new_sector * SECTOR_SIZE + new_page * PAGE_SIZE;
@@ -240,7 +240,6 @@ bool boot_save_passwords(const Password& pass, uint16_t current_index)
     return status == 0;
 }
 */
-
 /*void Input(char key)
 {
     if(key == '#') // clear
@@ -343,20 +342,6 @@ void Output(const char* output_str)
             break;
         }
     }
-<<<<<<< HEAD
-}
-=======
+
 }
 
-
-
-
-
-
-
-
-
-
-
-
->>>>>>> 7fbbe868eb9b47e3f380b41ab9ba54da5a542c80
