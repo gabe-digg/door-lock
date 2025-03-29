@@ -79,7 +79,7 @@ public:
     uint8_t CharPosition;
     void blink(int blink = 3);
     void deepsleepEnable(bool enable);
-
+    void puts(const char* str);  // Make sure this is declared
 private:
     void Write_Char(char lbValue);
     void init();

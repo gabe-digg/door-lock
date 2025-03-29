@@ -20,7 +20,4 @@ public:
 
     // we take the entire password we want to delete as an input
     bool delete_password (const char *password_to_delete);
-
-    
-
 };

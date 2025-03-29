@@ -1,4 +1,5 @@
 #pragma once
+#include <stdint.h>
 /*^^^^^^^^^^^^^^^^      LCD HARDWARE CONECTION ^^^^^^^^^^^^^^^^^^^^^^^^*/
 #define  _LCDFRONTPLANES   (8)            // # of frontPlanes
 #define  _LCDBACKPLANES    (4)            // # of backplanes
