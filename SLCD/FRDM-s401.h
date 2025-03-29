@@ -1,3 +1,4 @@
+#include <cstdint>
 #pragma once
 #include <stdint.h>
 /*^^^^^^^^^^^^^^^^      LCD HARDWARE CONECTION ^^^^^^^^^^^^^^^^^^^^^^^^*/
