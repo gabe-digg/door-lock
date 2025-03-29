@@ -41,6 +41,7 @@ char keypad_input[bufferSize] = {0};
 char display_output[bufferSize] = {0};
 int input_index = 0;
 int output_index = 0;
+//uint32_t FLASH_BASE = 0; //用于存储密码的 flash 区域起始地址 Start address of the flash area where the password is stored
 
 PasswordEntry current_entry;
 uint8_t input_pos = 0;
@@ -130,86 +131,112 @@ void init_flash()
         Output(" INIT DEFAULT");
     }
 }
-
-uint32_t calculate_checksum(const PasswordEntry& entry) 
+/*
+uint16_t calculate_checksum(const char* data, size_t len)  //计算给定数据的校验和 用指针是为了遍历数据 data的数据类型位char 但在加法时会自动转换为int不影响
 {
-    uint32_t crc = 0xFFFFFFFF;
-    //const uint8_t* data = (uint8_t*)&current_entry;
-    const uint8_t* data = reinterpret_cast<const uint8_t*>(&entry);
-    const size_t data_size = sizeof(PasswordEntry) - sizeof(uint32_t);
-    for(size_t i = 0; i < data_size; i++) 
-    {
-        crc ^= (data[i] << 24);
-        for(int j = 0; j < 8; j++) 
-        {
-            crc = (crc << 1) ^ ((crc & 0x80000000) ? 0x04C11DB7 : 0);
-        }
+    uint16_t sum = 0;
+    for (size_t i = 0; i < len; i++) {
+        sum += data[i];
     }
-    return crc;
+    return sum;
 }
 
-bool load_latest_entry() 
+bool boot_load_passwords(Password& pass, uint16_t& current_index) //& 是传reference 类似于传地址 函数内外改变同步
 {
-    uint32_t max_index = 0;
-    PasswordEntry valid_entry;
-    
-    for(int s = 0; s < SECTORS; s++) 
+    mymemory.init(); //flash的打开 open the flash
+
+    // 计算 FLASH 的用户区起始地址（靠近 flash 尾部）Calculates the start address of the FLASH user area 
+    FLASH_BASE = mymemory.get_flash_start() + mymemory.get_flash_size() - (SECTOR_NUM * SECTOR_SIZE);
+
+    uint16_t max_index = 0;
+    uint32_t latest_addr = 0;
+
+    PasswordEntry entry;
+
+    // 遍历两个扇区 × 每页 Traverse two sectors x each page
+    for (int sector = 0; sector < SECTOR_NUM; sector++) 
     {
-        uint32_t sector = (s == 0) ? (FLASH_TOTAL_SIZE - 2*FLASH_BLOCK_SIZE) 
-                                  : (FLASH_TOTAL_SIZE - FLASH_BLOCK_SIZE);
-        
-        for(int p = PAGES_PER_SECTOR -1; p >=0; p--) 
+        for (int page = 0; page < (SECTOR_SIZE / PAGE_SIZE); page++) 
         {
-            uint32_t addr = sector + p*PAGE_SIZE;
-            PasswordEntry temp;
-            mymemory.read(&temp, addr, sizeof(PasswordEntry));
-            
-            uint32_t stored_checksum = temp.checksum;
-            temp.checksum = 0;
-            uint32_t calc_checksum = calculate_checksum(temp);
-            
-            if(stored_checksum == calc_checksum && temp.index > max_index) 
+            uint32_t addr = FLASH_BASE + sector * SECTOR_SIZE + page * PAGE_SIZE;
+
+            if (mymemory.read(&entry, addr, sizeof(PasswordEntry)) != 0)
+                continue;
+              
+              // 计算实际校验和 Calculate the actual checksum
+            uint16_t calc = calculate_checksum((char*)entry.passwords, MAX_PASSWORDS * PASSWORD_SIZE);
+
+            // 如果校验通过且索引更大，则更新最新记录 If the check passes and the index is larger, the latest record is updated
+            if (entry.checksum == calc && emtry.idx >= max_index) 
             {
-                max_index = temp.index;
-                memcpy(&valid_entry, &temp, sizeof(PasswordEntry));
-                valid_entry.checksum = stored_checksum;
+                max_index = entry.idx;
+                latest_addr = addr;
             }
         }
+    }  
+
+    // 如果没找到有效页 If no valid page is found
+    if (latest_addr == 0) {
+        mymemory.deinit();
+        return false;
     }
-    
-    if(max_index > 0) 
+
+    if (mymemory.read(&entry, latest_addr , sizeof(PasswordEntry)) != 0)  //根据read的定义=0为成功
     {
-        memcpy(&current_entry, &valid_entry, sizeof(PasswordEntry));
-        return true;
+        mymemory.deinit();
+        return false;
     }
-    return false;
+
+    // 加载到 class Password 中 Load it into the class of Password
+    pass.load((char*)entry.passwords); 
+
+     /*void load(const char* raw) 
+    {
+        memcpy(passwords, raw, MAX_PASSWORDS * PASSWORD_SIZE)); 
+    }
+    need a   char passwords[MAX_PASSWORDS][PASSWORD_SIZE];*/
+
+    current_index = entry.index;
+    mymemory.deinit(); //flash的关闭 close the flash
+    return true;
 }
 
-void save_entry() 
+
+bool boot_save_passwords(const Password& pass, uint16_t current_index) 
 {
-    current_entry.index++;
-    current_entry.checksum = calculate_checksum(current_entry);
-    
-    uint32_t addr = current_sector + (current_page * PAGE_SIZE);
-    if(current_page % PAGES_PER_SECTOR == 0) 
+    mymemory.init();
+
+    // 下一页索引 Next page index
+    uint16_t new_index = current_index + 1;
+    // 计算页和扇区位置 Calculate page and sector locations
+    uint32_t page_per_sector = SECTOR_SIZE / PAGE_SIZE;
+    uint32_t new_page = new_index % page_per_sector;
+    uint32_t new_sector = (new_index / page_per_sector) % SECTOR_NUM;
+
+    // 如果是新扇区第一页，则需要先擦除整个扇区 If it is the first page of a new sector, you need to erase the entire sector first
+    if (new_page == 0) 
     {
-        mymemory.erase(current_sector, FLASH_BLOCK_SIZE);
+        mymemory.erase(FLASH_BASE + new_sector * SECTOR_SIZE, SECTOR_SIZE);
     }
 
-    char memory_buffer[PAGE_SIZE];
-    memcpy(memory_buffer, &current_entry, sizeof(PasswordEntry));
-    
-    if(mymemory.program(memory_buffer, addr, PAGE_SIZE) == 0) 
+    PasswordEntry entry;
+    entry.index = new_index;
+
+    pass.extract((char*)entry.passwords);  //写从class中提取密码的函数 May should write a function that extracts the password from the class
+    /* void extract(char* out) const 
     {
-        current_page = (current_page + 1) % PAGES_PER_SECTOR;
-        if(current_page == 0) 
-        {
-            current_sector = (current_sector == (FLASH_TOTAL_SIZE - 2*FLASH_BLOCK_SIZE)) 
-                            ? (FLASH_TOTAL_SIZE - FLASH_BLOCK_SIZE) 
-                            : (FLASH_TOTAL_SIZE - 2*FLASH_BLOCK_SIZE);
-        }
+        memcpy(out, passwords, MAX_PASSWORDS * PASSWORD_SIZE);
     }
+    need a   char passwords[MAX_PASSWORDS][PASSWORD_SIZE];*/
+    entry.checksum = calculate_checksum((char*)entry.passwords, MAX_PASSWORDS * PASSWORD_SIZE);
+
+    uint32_t addr = FLASH_BASE + new_sector * SECTOR_SIZE + new_page * PAGE_SIZE;
+
+    int status = mymemory.program(&entry, addr, sizeof(PasswordEntry)); //放进flash中 status == 0 表示成功 status == 0 indicates success
+    mymemory.deinit();
+    return status == 0;
 }
+*/
 
 /*void Input(char key)
 {
@@ -314,6 +341,15 @@ void Output(const char* output_str)
         }
     }
 }
+
+
+
+
+
+
+
+
+
 
 
 
