@@ -2,7 +2,9 @@
 #include <cstring>
 
 // Constructor - Default passwords
-Password::Password() : password_count(0) {
+
+Password::Password() : password_count(1) 
+{
     char trial[9] = "12345678";
     add_password (trial); // Add a default password
 }
@@ -37,7 +39,7 @@ bool Password::delete_password(const char* password_to_delete) {
 }
 
 
-int Password::check_password(char password_number_input[9])
+/*int Password::check_password(char password_number_input[9])
 {
     int check = 0;
     int i = 0;
@@ -61,7 +63,16 @@ int Password::check_password(char password_number_input[9])
     }
     return 99;
 
+}*/
+int Password::check_password(char password_number_input[9]) {
+    for (int i = 0; i < password_count; i++) {
+        if (strncmp(password_number_input, stored_passwords[i], MAX_LENGTH) == 0) {
+            return i;  // 匹配哪个密码
+        }
+    }
+    return 99;  // 没找到
 }
+
 
 void Password::load_password(const char *raw) {
 memcpy(stored_passwords, raw, MAX_LENGTH * MAX_PASSWORDS);

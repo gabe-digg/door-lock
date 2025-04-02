@@ -2,336 +2,527 @@
  * Copyright (c) 2019 ARM Limited
  * SPDX-License-Identifier: Apache-2.0
  */
+
+
 #include "mbed.h"
-#include "keypad.h"
-#include "ThisThread.h"
-#include "SLCD.h"
 #include "FlashIAP.h"
-#include "Password.h"
-#include <string>
+#include "SLCD.h"
+#include "keypad.h"
+#include <cstring>
 
-#define FLASH_TOTAL_SIZE    0x00040000  // 256KB
-#define FLASH_BLOCK_SIZE    1024        // 扇区大小1KB
-#define PAGE_SIZE           256         
-#define SECTORS             2
-#define PAGES_PER_SECTOR    4
-#define DEFAULT_ADMIN_PW    "00000000"  
-Password pass;
+#define FLASH_TOTAL_SIZE    0x00040000
+#define PASSWORD_LENGTH 9
+#define MAX_USERS 10
+#define SECTOR_SIZE 1024
+#define PAGE_SIZE 256
 
-#define SECTOR0_START       (FLASH_TOTAL_SIZE - 2 * FLASH_BLOCK_SIZE)  // 0x3F800
-#define SECTOR1_START       (FLASH_TOTAL_SIZE - FLASH_BLOCK_SIZE)       // 0x3FC00
+#define SECTOR1_ADDR 0x3F800
+#define SECTOR2_ADDR 0x3FC00
 
+#define DISPLAY_DIGITS 4
+#define BUFFER_SIZE 32
 
-struct PasswordEntry 
+struct FlashData 
 {
     uint16_t index;
-    char passwords[pass.MAX_PASSWORDS][pass.MAX_LENGTH];
+    char passwordlist[MAX_USERS][PASSWORD_LENGTH];
     uint16_t checksum;
 };
 
+FlashData current_structure;
+char password_buffer[PASSWORD_LENGTH];
+char password_change[PASSWORD_LENGTH];
+char password_add[PASSWORD_LENGTH];
+char display_buffer[BUFFER_SIZE] = {0};
+int display_index = 0;
+char first_key;
+
+uint16_t calculate_checksum(const FlashData &data);
+bool validate_checksum(const FlashData &data);
+void factory_reset();
+void init_flash();
+void load_password();
+void save_password();
+int check_password(const char input[PASSWORD_LENGTH]);
+bool delete_password(int serial);
+void scroll_on_displayer(char new_char);
+void input_password(char *buffer, char a);
+char Output(const char* output_str);
+int get_serial_input_from_keypad();
+
 Keypad mykeypad(PTC8, PTA5, PTA4, PTA12, PTD3, PTA2, PTA1);
 SLCD mydisplay;
-FlashIAP mymemory;
-Thread thread1;
-const int bufferSize = 32;
-const int displayDigits = 4;
-char keypad_input[bufferSize] = {0};
-char display_output[bufferSize] = {0};
-int input_index = 0;
-int output_index = 0;
-uint32_t FLASH_BASE = 0; //用于存储密码的 flash 区域起始地址 Start address of the flash area where the password is stored
+FlashIAP myflash;
 
-PasswordEntry current_entry;
-uint8_t input_pos = 0;
-uint32_t current_sector = SECTOR0_START;
-uint32_t current_page = 0;
-char input_buffer[9] = {0};
-
-
-
-void init_flash();
-uint16_t calculate_checksum(const char* data, size_t len);
-bool boot_load_passwords(Password& pass, uint16_t& current_index);
-
-bool boot_save_passwords(const Password& pass, uint16_t current_index);
-//void Input(char key);
-void handle_input_display(char new_char);
-void Output(const char* output_str);
-char* keypress_to_array(char one_key);
-int waiting_for_input ();
-
-
-int main() 
-{
-    mydisplay.clear();
-    mydisplay.Home();
-
-    init_flash();
-    Output(" DONE");
- int correct_password = thread1.start(waiting_for_input);   
-    for (int i = 0; i < bufferSize; i++) 
-    {
-        keypad_input[i] = ' ';
-    }
-}
-
-char* keypress_to_array(char one_key){
-    char pressedkey;        
-    static char input[9]; // 8 digits + '#' + null terminator
-    input[0]= one_key;
-    int index = 1;
-
-    while (index < 8)
-    {
-        pressedkey = mykeypad.ReadKey();
-        if ((pressedkey == '#')||(index>=8)) //  ente
-        { 
-            input[index] = '\0'; // Null-terminate the password
-        //printf("Password entered: %s\n", input);
-            index = 0; // Reset for next input
-            return input;
-        } 
-        else if (pressedkey >= '0' && pressedkey <= '9') {
-            input[index++] = pressedkey;
-            handle_input_display(pressedkey);
-        }
-    ThisThread::sleep_for(10ms);
-    }
-input[8] = '\0'; // Ensure null termination
-return input;
-}
-int waiting_for_input (){
-    while(true)
-     {
-        char key = mykeypad.ReadKey();
-
-        if(key != NO_KEY && key >= '0' && key <= '9') 
-        {
-            char* password_input = keypress_to_array(key);
-            int password_number = pass.check_password(password_input);
-            return password_number;
-        }
-        ThisThread::sleep_for(20ms);
-    }
-           
-
-}
-
-
- 
-
-
-uint16_t calculate_checksum(const char* data, size_t len)  //计算给定数据的校验和 用指针是为了遍历数据 data的数据类型位char 但在加法时会自动转换为int不影响
+uint16_t calculate_checksum(const FlashData &data) 
 {
     uint16_t sum = 0;
-    for (size_t i = 0; i < len; i++) {
-        sum += data[i];
+    for (int i = 0; i < MAX_USERS; i++) {
+        for (int j = 0; j < PASSWORD_LENGTH; j++) {
+            sum += data.passwordlist[i][j];
+        }
     }
+    sum += data.index;
     return sum;
 }
 
-bool boot_load_passwords(Password& pass, uint16_t& current_index) //& 是传reference 类似于传地址 函数内外改变同步
+bool validate_checksum(const FlashData &data) 
 {
-    mymemory.init(); //flash的打开 open the flash
+    return data.checksum == calculate_checksum(data);
+}
 
-    // 计算 FLASH 的用户区起始地址（靠近 flash 尾部）Calculates the start address of the FLASH user area 
-    FLASH_BASE = mymemory.get_flash_start() + mymemory.get_flash_size() - (SECTORS * FLASH_BLOCK_SIZE);
+void factory_reset() 
+{
+    myflash.erase(SECTOR1_ADDR, SECTOR_SIZE);
+    myflash.erase(SECTOR2_ADDR, SECTOR_SIZE);
 
+    memset(&current_structure, 0, sizeof(current_structure));
+    current_structure.index = 1;
+    strcpy(current_structure.passwordlist[0], "12345678");
+    current_structure.checksum = calculate_checksum(current_structure);
+    myflash.program(&current_structure, SECTOR1_ADDR, sizeof(FlashData));
+}
+
+void init_flash()
+{
+    myflash.init();
+    FlashData temp;
     uint16_t max_index = 0;
-    uint32_t latest_addr = 0;
+    bool found_valid = false;
 
-    PasswordEntry entry;
-
-    // 遍历两个扇区 × 每页 Traverse two sectors x each page
-    for (int sector = 0; sector < SECTORS; sector++) 
+    for (int i = 0; i < 8; i++) 
     {
-        for (int page = 0; page < (FLASH_BLOCK_SIZE / PAGE_SIZE); page++) 
-        {
-            uint32_t addr = FLASH_BASE + sector * FLASH_BLOCK_SIZE + page * PAGE_SIZE;
+        uint32_t addr;
+        if (i < 4) {
+            addr = SECTOR1_ADDR + i * PAGE_SIZE;
+        } 
+        else {
+            addr = SECTOR2_ADDR + (i - 4) * PAGE_SIZE;
+        }
+        myflash.read(&temp, addr, sizeof(FlashData));
+        if (validate_checksum(temp) && temp.index > max_index) {
+            max_index = temp.index;
+            found_valid = true;
+        }
+    }
 
-            if (mymemory.read(&entry, addr, sizeof(PasswordEntry)) != 0)
-                continue;
-              
-              // 计算实际校验和 Calculate the actual checksum
-            uint16_t calc = calculate_checksum((char*)entry.passwords, pass.MAX_PASSWORDS * pass.MAX_LENGTH + 1);
+    if (!found_valid) {
+        factory_reset();
+    }
+    myflash.deinit();
+}
 
-            // 如果校验通过且索引更大，则更新最新记录 If the check passes and the index is larger, the latest record is updated
-            if (entry.checksum == calc && entry.index >= max_index) 
-            {
-                max_index = entry.index;
-                latest_addr = addr;
+void load_password() 
+{
+    myflash.init();
+    FlashData temp;
+    uint16_t max_valid_index = 0;
+    uint32_t max_valid_addr = 0;
+
+    for (int i = 0; i < 8; i++) 
+    {
+        uint32_t addr;
+        if (i < 4) {
+            addr = SECTOR1_ADDR + i * PAGE_SIZE;
+        }
+        else {
+            addr = SECTOR2_ADDR + (i - 4) * PAGE_SIZE;
+        }
+
+        myflash.read(&temp, addr, sizeof(FlashData));
+
+        if (validate_checksum(temp) && temp.index > max_valid_index) {
+            max_valid_index = temp.index;
+            max_valid_addr = addr;
+        }
+    }
+
+    myflash.read(&current_structure, max_valid_addr, sizeof(FlashData));
+    myflash.deinit();
+}
+
+void save_password() 
+{
+    myflash.init();
+    current_structure.index++;
+    current_structure.checksum = calculate_checksum(current_structure);
+
+    uint16_t new_page = (current_structure.index - 1) % 8;
+
+    if (new_page == 0) {
+        myflash.erase(SECTOR1_ADDR, SECTOR_SIZE);
+    } 
+    else if (new_page == 4) {
+        myflash.erase(SECTOR2_ADDR, SECTOR_SIZE);
+    }
+
+    uint32_t addr;
+    if (new_page < 4) {
+        addr = SECTOR1_ADDR + new_page * PAGE_SIZE;
+    } 
+    else {
+        addr = SECTOR2_ADDR + (new_page - 4) * PAGE_SIZE;
+    }
+    
+    myflash.program(&current_structure, addr, sizeof(FlashData));
+    myflash.deinit();
+}
+
+int check_password(const char input[PASSWORD_LENGTH]) 
+{
+    load_password();
+    for (int i = 0; i < MAX_USERS; i++) 
+    {
+        bool match = true;
+        for (int j = 0; j < PASSWORD_LENGTH; j++) {
+            if (current_structure.passwordlist[i][j] != input[j]) {
+                match = false;
+                break;
             }
         }
-    }  
-
-    // 如果没找到有效页 If no valid page is found
-    if (latest_addr == 0) {
-        mymemory.deinit();
-        return false;
+        if (match) {
+            return i + 1;
+        }
     }
+    return 99;
 
-    if (mymemory.read(&entry, latest_addr , sizeof(PasswordEntry)) != 0)  //根据read的定义=0为成功
+}
+
+bool delete_password(int serial) 
+{
+    mydisplay.clear();
+    mydisplay.Home();
+    memset(display_buffer, 0, BUFFER_SIZE);
+
+    for (int i = 0; i < 8; i++) 
     {
-        mymemory.deinit();
-        return false;
+        char c = current_structure.passwordlist[serial][i];
+        if (c >= '0' && c <= '9') {
+            scroll_on_displayer(c);
+        }
+        ThisThread::sleep_for(300ms);
+    }
+    
+    mydisplay.clear();
+    mydisplay.Home();
+    mydisplay.puts(" YE5");
+    ThisThread::sleep_for(2s);
+    mydisplay.clear();
+    mydisplay.Home();
+    mydisplay.puts(" OR ");
+    ThisThread::sleep_for(1s);
+    mydisplay.clear();
+    mydisplay.Home();
+    mydisplay.puts(" N0 ");
+    ThisThread::sleep_for(2s);
+    mydisplay.clear();
+    mydisplay.Home();
+
+    char confirm;
+    do {
+        confirm = mykeypad.ReadKey();
+        ThisThread::sleep_for(10ms);
+    } while (confirm != '#' && confirm != '*');
+
+    if (confirm == '#') {
+        memset(current_structure.passwordlist[serial], 0, PASSWORD_LENGTH);
+        return true;
     }
 
-    // 加载到 class Password 中 Load it into the class of Password
-    pass.load_password((char*)entry.passwords); 
+    return false;
+}
 
-    current_index = entry.index;
-    mymemory.deinit(); //flash的关闭 close the flash
-    return true;
+void add_password(int serial, char newpass[PASSWORD_LENGTH]) 
+{
+    
+    memcpy(current_structure.passwordlist[serial], newpass, PASSWORD_LENGTH);
+    
 }
 
 
-bool boot_save_passwords(const Password& pass, uint16_t current_index) 
-{
-    mymemory.init();
-
-    // 下一页索引 Next page index
-    uint16_t new_index = current_index + 1;
-    // 计算页和扇区位置 Calculate page and sector locations
-    uint32_t page_per_sector = FLASH_BLOCK_SIZE / PAGE_SIZE;
-    uint32_t new_page = new_index % page_per_sector;
-    uint32_t new_sector = (new_index / page_per_sector) % SECTORS;
-
-    // 如果是新扇区第一页，则需要先擦除整个扇区 If it is the first page of a new sector, you need to erase the entire sector first
-    if (new_page == 0) 
-    {
-        mymemory.erase(FLASH_BASE + new_sector * FLASH_BLOCK_SIZE, FLASH_BLOCK_SIZE);
-    }
-
-    PasswordEntry entry;
-    entry.index = new_index;
-
-	memcpy(entry.passwords, pass.stored_passwords, pass.MAX_LENGTH * pass.MAX_PASSWORDS);
-
-
-    entry.checksum = calculate_checksum((char*)entry.passwords, pass.MAX_PASSWORDS * pass.MAX_LENGTH + 1);
-
-    uint32_t addr = FLASH_BASE + new_sector * FLASH_BLOCK_SIZE + new_page * PAGE_SIZE;
-
-    int status = mymemory.program(&entry, addr, sizeof(PasswordEntry)); //放进flash中 status == 0 表示成功 status == 0 indicates success
-    mymemory.deinit();
-    return status == 0;
-}
-
-/*void Input(char key)
-{
-    if(key == '#') // clear
-    {  
-        memset(keypad_input, 0, bufferSize);
-        input_index = 0;
-        input_pos = 0;
-        mydisplay.clear();
-    }
-    else if(key == '*') //enter
-    {  
-        if(input_pos == 8) 
-        {
-            //validate_password(input_buffer);
-            pass.check_password(input_buffer);
-             mydisplay.clear();
-        }
-    }
-    else if(key >= '0' && key <= '9') 
-    {  
-        if(input_pos < 8) 
-        {
-            handle_input_display(key);
-        }
-    }
-} */
-
-
-void handle_input_display(char new_char) 
+void scroll_on_displayer(char new_char) 
 {
     if(new_char >= '0' && new_char <= '9') 
     {
-        keypad_input[input_index] = new_char;
-        input_index = (input_index + 1) % bufferSize;
-
-        //input_buffer[input_pos++] = new_char;  //check
+        display_buffer[display_index] = new_char;
+        display_index = (display_index + 1) % BUFFER_SIZE;
 
         mydisplay.clear();
         mydisplay.Home();
             
-        int input_start = (input_index - displayDigits + bufferSize) % bufferSize;
+        int input_start = (display_index - DISPLAY_DIGITS + BUFFER_SIZE) % BUFFER_SIZE;
             
-        for (int i = displayDigits - 1; i >= 0; i--) 
+        for (int i = DISPLAY_DIGITS - 1; i >= 0; i--) 
         {
-            char c = keypad_input[(input_start + i) % bufferSize];
+            char c = display_buffer[(input_start + i) % BUFFER_SIZE];
             mydisplay.putc(c);
         }
     }
 }
 
-void init_flash() 
+void input_password(char *buffer, char a) 
 {
-    mymemory.init();
-    if(!boot_load_passwords()) 
+    int index = 1;
+    memset(buffer, 0, BUFFER_SIZE);
+    memset(display_buffer, 0, BUFFER_SIZE);
+
+    buffer[0] = a;
+    scroll_on_displayer(a);
+
+    while (true) 
     {
-        memset(&current_entry, 0, sizeof(PasswordEntry));
-        strcpy(current_entry.passwords[0], DEFAULT_ADMIN_PW);
-        current_entry.index = 1;
-        current_entry.checksum = calculate_checksum(current_entry, sizeof(current_entry));
-        boot_save_passwords();
-        Output(" INIT DEFAULT");
-    }
-}
+        char key;
 
-void Output(const char* output_str) 
-{
-    int print_len = strlen(output_str);
-    int max_print = bufferSize - 1; 
-    char SLCD_output[4] = {' ',' ',' ',' '};
-    int output_scrollPosition = 0;
-    int output_start;
-    int output_start_max = print_len - displayDigits;
-    int d;
-    int end_display;
+        do {
+            key = mykeypad.ReadKey();
+            ThisThread::sleep_for(200ms);
+        } while (!((key >= '0' && key <= '9') || key == '#' || key == '*'));
 
-    end_display = print_len * 3 - displayDigits + 1;
-
-    for (int b = 0; b < bufferSize; b++) 
-    {
-        display_output[b] = ' ';
-    }
-
-    output_index = 0;
-    
-    for (int o = 0; output_str[o] != '\0'; ++o) 
-    {
-        display_output[output_index] = output_str[o];
-        output_index = (output_index + 1) % bufferSize;
-    }
-    display_output[print_len] = '\0';
-    
-    output_start = 0;
-
-    d = 0;
-    while (true)
-    { 
-        mydisplay.clear();
-        mydisplay.Home();
-        for (int s = 0; s < displayDigits; s++) 
+        if (key >= '0' && key <= '9') 
         {
-            int char_idx = (output_start + s) % print_len; 
-            SLCD_output[s] = output_str[char_idx];
-        }
-        mydisplay.puts(SLCD_output);
-        
-        output_start = (output_start + 1) % print_len;
-        ThisThread::sleep_for(300ms);
-        d++;
-        if(d >= end_display)
+            if (index < PASSWORD_LENGTH - 1) 
+            {
+                buffer[index++] = key;
+                scroll_on_displayer(key);
+            }
+        } 
+        else if (key == '#') 
         {
+            buffer[index] = '\0';
+            break;
+        } 
+        else if (key == '*') 
+        {
+            memset(buffer, 0, PASSWORD_LENGTH);
+            index = 0;
             mydisplay.clear();
             mydisplay.Home();
-            break;
+            memset(display_buffer, 0, BUFFER_SIZE);
+            display_index = 0;
         }
     }
 
 }
 
+
+char Output(const char* output_str) 
+{
+    const int print_len = strlen(output_str);
+    const int scroll_times = 2;
+    const int scroll_steps = print_len * scroll_times - DISPLAY_DIGITS + 1;
+    char SLCD_output[DISPLAY_DIGITS + 1] = {' ', ' ', ' ', ' ', '\0'};
+    char display_output[BUFFER_SIZE] = {0};
+    char key = '\0';
+
+    for (int i = 0; i < BUFFER_SIZE; i++) {
+        display_output[i] = ' ';
+    }
+
+    for (int i = 0; i < print_len && i < BUFFER_SIZE - 1; ++i) {
+        display_output[i] = output_str[i];
+    }
+
+    int output_start = 0;
+    int total_steps = (print_len > DISPLAY_DIGITS) ? scroll_steps : (scroll_times * (DISPLAY_DIGITS + 1));
+
+    for (int step = 0; step < total_steps; ++step) 
+    {
+        char key = mykeypad.ReadKey();
+        if (key != '\0') return key;
+
+        mydisplay.clear();
+        mydisplay.Home();
+
+        for (int s = 0; s < DISPLAY_DIGITS; ++s) 
+        {
+            int char_idx = (output_start + s) % print_len;
+            SLCD_output[s] = display_output[char_idx];
+        }
+
+        SLCD_output[DISPLAY_DIGITS] = '\0';
+        mydisplay.puts(SLCD_output);
+
+        output_start = (output_start + 1) % print_len;
+        ThisThread::sleep_for(300ms);
+    }
+
+    mydisplay.clear();
+    mydisplay.Home();
+
+    int start_idx = (print_len >= 4) ? (print_len - 4) : 0;
+    int pad_spaces = DISPLAY_DIGITS - (print_len - start_idx);
+
+    for (int i = 0; i < pad_spaces; ++i) {
+        SLCD_output[i] = ' ';
+    }
+    for (int i = start_idx, j = pad_spaces; i < print_len && j < DISPLAY_DIGITS; ++i, ++j) {
+        SLCD_output[j] = output_str[i];
+    }
+    SLCD_output[DISPLAY_DIGITS] = '\0';
+    mydisplay.puts(SLCD_output);
+
+    for (int i = 0; i < 1000000; ++i) {
+        char key = mykeypad.ReadKey();
+        if (key != '\0') return key;
+        ThisThread::sleep_for(100ms);
+    }
+
+    mydisplay.clear();
+    mydisplay.Home();
+    return key;
+}
+
+
+int main() {
+    init_flash();
+
+    while (true) {
+        first_key = Output(" PA55");
+        mydisplay.clear();
+        input_password(password_buffer, first_key);
+        int user = check_password(password_buffer);
+
+        if (user == 1) {  // Admin mode
+            while (true) {
+                first_key = Output(" 10PE 2CHA 3ADD 4DEL 5EX1 CH005E");
+                mydisplay.clear();
+
+                char opt;
+                do {
+                    opt = first_key;
+                    ThisThread::sleep_for(200ms);
+                } while (opt < '1' || opt > '5');
+
+                if (opt == '1') {
+                    mydisplay.puts("0PEN");
+                    ThisThread::sleep_for(3s);
+                    mydisplay.clear();
+                    mydisplay.Home();
+                    break;
+                } 
+                else if (opt == '2') 
+                {
+                    int sn = get_serial_input_from_keypad(); 
+                    load_password();
+
+                    if (delete_password(sn)) 
+                    {
+                        first_key = Output(" NEPA");
+                        input_password(password_change, first_key);
+                        add_password(sn, password_change);
+                        memset(password_add, 0, PASSWORD_LENGTH);
+                        save_password();
+                        mydisplay.puts("D0NE");
+                        ThisThread::sleep_for(3s);
+                        mydisplay.clear();
+                        mydisplay.Home();
+                    }
+                    else 
+                    {
+                        mydisplay.puts("FA1L");
+                        ThisThread::sleep_for(3s);
+                        mydisplay.clear();
+                        mydisplay.Home();
+                    }
+                    
+                    
+                } 
+                else if (opt == '3') 
+                {
+                    int sn = get_serial_input_from_keypad(); 
+                    load_password();
+
+                   
+                    if(current_structure.passwordlist[sn][0] != 0)
+                    {
+                        mydisplay.clear();
+                        mydisplay.Home(); 
+                        mydisplay.puts("FA1L");
+                        ThisThread::sleep_for(3s);
+                        mydisplay.clear();
+                        mydisplay.Home();
+                    }
+                    else
+                    {
+                        first_key = Output(" NEPA");
+                        input_password(password_add, first_key);
+                        add_password(sn, password_add);
+                        memset(password_add, 0, PASSWORD_LENGTH);
+                        save_password();
+                        mydisplay.clear();
+                        mydisplay.Home(); 
+                        mydisplay.puts(" ADD");
+                        ThisThread::sleep_for(3s);
+                        mydisplay.clear();
+                        mydisplay.Home();
+
+                    }
+                } 
+                else if (opt == '4')
+                 { 
+                    int sn = get_serial_input_from_keypad(); 
+                    load_password();
+
+                    if (delete_password(sn)) 
+                    {
+                        save_password();
+                        mydisplay.puts("D0NE");
+                        ThisThread::sleep_for(3s);
+                        mydisplay.clear();
+                        mydisplay.Home();;
+                    } 
+                    else 
+                    {
+                        mydisplay.puts("FA1L");
+                        ThisThread::sleep_for(3s);
+                        mydisplay.clear();
+                        mydisplay.Home();
+                    }
+                } 
+                else if (opt == '5') {
+                    break; 
+                }
+            }
+        } 
+        else if (user >= 2 && user <= 10) {
+            mydisplay.puts("0PEN");
+            ThisThread::sleep_for(3s);
+            mydisplay.clear();
+            mydisplay.Home();
+        } 
+        else {
+            mydisplay.puts("FA1L");
+            ThisThread::sleep_for(3s);
+            mydisplay.clear();
+            mydisplay.Home();
+        }
+    }
+}
+
+int get_serial_input_from_keypad()
+{
+    char buffer[2] = {0};
+    int index = 0;
+
+    mydisplay.clear();
+    mydisplay.Home();
+
+
+    for (int a = 0; a < 2; a++)
+    {
+        buffer[a] = 0;
+    }
+    char key = Output(" U5ER");
+
+    if (key >= '0' && key <= '9') {
+        buffer[index++] = key;
+        mydisplay.clear();
+        mydisplay.Home();
+        for (int i = 0; i < index; i++) {
+            mydisplay.putc(buffer[i]);
+        }
+    } else if (key == '#') {
+        return (atoi(buffer)-1);
+    }
+    return (atoi(buffer)-1);
+}
